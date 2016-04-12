@@ -6,6 +6,29 @@
 # Method from "Flexible Latent Variable Models for Multi-Task Learning"
 ################################################################################
 
+#' @title Likelihood contribution to VB expected posterior
+#' @description Computes the term
+#'  \sum_{r = 1}^{R} \sum_{i = 1}^{n_{r}} 1 / 2 * sigma ^ 2 ((y_{i}^{(r)} - x_{i}^{(r) T}m^{(r)})^2 + x_{i}^{(r) T} V^{(r)} x_{i}^{(r)}
+#' @export
+lik_multinom <- function(x_list, y_list, m_list, v_list, sigma) {
+  R <- length(x_list)
+  task_sums <- vector(length = R)
+  for(r in seq_len(R)) {
+    bias2 <- sum( (y_list[[r]] - x_list[[r]] %*% m_list[[r]]) ^ 2 )
+    variance <- sum( diag(v_list[[r]] %*% crossprod(x_list[[r]])) )
+    tasks_sums[r] <- bias2 + variance
+  }
+  (1 / (2 * sigma ^ 2)) * sum(task_sums)
+}
+
+#' @title Cross-Tasks multinomial entropy
+#' @description Say r indexes tasks and k indexes latent source clusters.
+#' Then, this term is 
+#' sum_{r = 1}^{R} \sum_{k = 1}^{K} pi_{k}^{(r)} \log(\pi_{k}^{(r)})
+#'
+#' I really should be using the log-sum-exp trick, but hopefully pi
+#' never gets too small in these preliminary experiments.
+#' @export
 multinom_entropy <- function(log_pi_list) {
   R <- length(log_pi_list)
   task_sums <- vector(length = R)
@@ -42,7 +65,8 @@ vb_bound_multin <- function(data_list, var_list, param_list) {
     abind(along = 3) %>%
     apply(c(1, 2), sum)
 
-  - N / 2 * log(sigma ^ 2) - lik_multin(x_list, y_list, m_list, V_list) -
+  - N / 2 * log(sigma ^ 2) -
+    lik_multinom(x_list, y_list, m_list, v_list, sigma) -
     N / 2 * log(det(Psi)) - 1 / 2 * tr(Psi_inv * v_weighted) -
       1 / 2 * mean_source_multinom(n, log_pi_list, m_list, S, Psi_inv) +
       mulitnom_loglik(n, pi_list, phi) +
