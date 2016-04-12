@@ -113,3 +113,29 @@ vb_bound_multin <- function(data_list, var_list, param_list) {
       mulitnom_loglik(n, log_pi_list, phi) +
       1 / 2 * sum_log_det(v_list) - multinom_entropy(log_pi_list))
 }
+
+# E-step -----------------------------------------------------------------------
+
+#' @title Update a single V^{(r)}
+#' @description 1 / n_{r}  * (\Psi^{-1} + \frac{1}{n_{r}\sigma^{2}}\sum_{i = 1}^{n_{r}}x_{i}^{(r)}x_{i}^{(r) T})^{-1}
+update_v <- function(x, Psi, sigma) {
+  n <- nrow(x)
+  1 / n * solve(solve(Psi) + 1 / (n * (sigma ^ 2)) * crossprod(x))
+}
+
+update_m <- function(x, y, Psi_inv, S, log_pi, sigma) {
+  n <- nrow(x)
+  A <- (1 / sigma ^ 2) * crossprod(x) + n * Psi_inv
+  B <- 1 / (sigma ^ 2) * t(x) %*% y + n * Psi_inv %*% S %*% exp(log_pi)
+  solve(A, B)
+}
+
+update_log_pi <- function(m, S, Psi_inv, phi) {
+  K <- ncol(S)
+  log_pi_unnorm <- vector(length = K)
+  for(k in seq_len(K)) {
+    log_pi_unnorm[k] <- log(phi[k]) + t(m - S[, k]) %*% Psi_inv %*% (m - S[, k])
+  }
+  pi_unnorm <- exp(log_pi_unnorm)
+  pi_unnorm / sum(pi_unnorm)
+}
