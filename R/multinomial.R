@@ -25,13 +25,13 @@ gsn_loglik <- function(x_list, y_list, m, v_list, sigma) {
 #' @description Computes the term
 #' \sum_{r = 1}^{R}\sum_{k = 1}^{K} n_{r}\pi_{k}^{(r)} *
 #' (m^{(r)} - s_{\cdot k})^{T}\Psi^{-1}(m^{(r)} - s_{\cdot k})
-mean_source_multinom <- function(n, log_pi_list, m, S, Psi_inv) {
+mean_source_multinom <- function(n, log_pi, m, S, Psi_inv) {
   R <- length(r)
   K <- ncol(S)
   vals <- matrix(0, R, K)
   for (r in seq_len(R)) {
     for (k in seq_len(K)) {
-      pi_rk <- exp(log_pi_list[[r]][k])
+      pi_rk <- exp(log_pi[k, r])
       vals[r, k]  <- n[r] *  pi_rk *
         t(m[, r] - S[, k]) %*% Psi_inv %*% (m[, r] - S[, k])
     }
@@ -42,10 +42,10 @@ mean_source_multinom <- function(n, log_pi_list, m, S, Psi_inv) {
 #' @title Calculate expected multinomial likelihood term in posterior
 #' @description Computes
 #' sum_{r = 1}^{R} \sum_{k = 1}^{K} n_{r}pi_{k}^{(r)} \log \varphi_{k}
-mulitnom_loglik <- function(n, log_pi_list, phi) {
+mulitnom_loglik <- function(n, log_pi, phi) {
   task_sums <- vector(length = length(n))
   for (r in seq_along(n)) {
-    task_sums[r] <- n[r] * sum( exp(log_pi_list[[r]]) * log(phi) )
+    task_sums[r] <- n[r] * sum( exp(log_pi[, r]) * log(phi) )
   }
   sum(task_sums)
 }
@@ -69,11 +69,11 @@ sum_log_det <- function(v_list) {
 #' I really should be using the log-sum-exp trick, but hopefully pi
 #' never gets too small in these preliminary experiments.
 #' @export
-multinom_entropy <- function(log_pi_list) {
-  R <- length(log_pi_list)
+multinom_entropy <- function(log_pi) {
+  R <- ncol(log_pi)
   task_sums <- vector(length = R)
   for (r in seq_len(R)) {
-    task_sums[r] <- sum(log_pi_list[[r]] * exp(log_pi_list[[r]]))
+    task_sums[r] <- sum(log_pi[, r] * exp(log_pi[, r]))
   }
   sum(task_sums)
 }
@@ -95,7 +95,7 @@ vb_bound_multinom <- function(data_list, var_list, param_list) {
   # retrieve variational and fixed parameters
   m <- var_list$m
   v_list <- var_list$v_list
-  log_pi_list <- var_list$log_pi_list
+  log_pi <- var_list$log_pi
   S <- param_list$S
   Psi <- param_list$Psi
   phi <- param_list$phi
@@ -109,9 +109,9 @@ vb_bound_multinom <- function(data_list, var_list, param_list) {
   (1 / N) * (- N / 2 * log(sigma ^ 2) -
     gsn_loglik(x_list, y_list, m, v_list, sigma) -
     N / 2 * log(det(Psi)) - 1 / 2 * sum(diag(Psi_inv * v_weighted)) -
-      1 / 2 * mean_source_multinom(n, log_pi_list, m, S, Psi_inv) +
-      mulitnom_loglik(n, log_pi_list, phi) +
-      1 / 2 * sum_log_det(v_list) - multinom_entropy(log_pi_list))
+      1 / 2 * mean_source_multinom(n, log_pi, m, S, Psi_inv) +
+      mulitnom_loglik(n, log_pi, phi) +
+      1 / 2 * sum_log_det(v_list) - multinom_entropy(log_pi))
 }
 
 # E-step -----------------------------------------------------------------------
@@ -151,12 +151,12 @@ update_log_pi <- function(m, S, Psi_inv, phi) {
 #' @description
 #' \varphi_{k} &\propto \sum_{r = 1}^{p_{1}} n_{r}\pi_{k}^{(r)}
 #' @export
-update_phi <- function(n, log_pi_list) {
+update_phi <- function(n, log_pi) {
   R <- length(n)
-  K <- length(log_pi_list[[1]])
+  K <- nrow(log_pi)
   phi_unnorm <- matrix(0, R, K)
   for (r in seq_len(R)) {
-    phi_unnorm[r, ] <- n[r] * exp(log_pi_list[[r]])
+    phi_unnorm[r, ] <- n[r] * exp(log_pi[, r])
   }
   phi_unnorm <- colSums(phi_unnorm)
   phi_unnorm / sum(phi_unnorm)
@@ -166,7 +166,7 @@ update_phi <- function(n, log_pi_list) {
 #' @description
 #' \hat{Psi} &= \frac{1}{N}\sum_{r = 1}^{p_{1}}n_{r}\left(V^{(r)} + \sum_{k = 1}^{K}  \pi_{k}^{(r)}\left(m^{(r)} - s_{\cdot k}\right)\left(m^{(r)} - s_{\cdot k}\right)^{T}\right)
 #' @export
-update_Psi <- function(n, v_list, m, S, log_pi_list) {
+update_Psi <- function(n, v_list, m, S, log_pi) {
   R <- length(n)
   K <- ncol(S)
   p <- nrow(v_list[[1]])
@@ -174,7 +174,7 @@ update_Psi <- function(n, v_list, m, S, log_pi_list) {
   for (r in seq_len(R)) {
     m_offset <- array(0, c(p, p, K))
     for(k in seq_len(K)) {
-      pi_rk <- exp(log_pi_list[[r]][k])
+      pi_rk <- exp(log_pi[k, r])
       m_offset[,, k] <- pi_rk * (m[, r] - S[, k]) %*% t(m[, r] - S[, k])
     }
     task_sums[,, r] <- n[r] * (v_list[[r]] + apply(m_offset, c(1, 2), sum))
@@ -186,8 +186,8 @@ update_Psi <- function(n, v_list, m, S, log_pi_list) {
 #' @description The k^th column is updated as
 #' \hat{s}_{\cdot k} &= \frac{\sum_{r = 1}^{p_{1}} n_{r}\pi_{k}^{(r)} m^{(r)}}{\sum_{r = 1}^{p_{1}} n_{r}\pi_{k}^{(r)}}
 #' @export
-update_S <- function(n, log_pi_list, m) {
-  K <- length(log_pi_list[[1]])
+update_S <- function(n, log_pi, m) {
+  K <- nrow(log_pi)
   p <- nrow(m)
   R <- length(n)
   S <- matrix(0, p, K)
@@ -195,7 +195,7 @@ update_S <- function(n, log_pi_list, m) {
     num <- matrix(0, nrow = p, ncol = R)
     denom <- vector(length = R)
     for(r in seq_len(R)) {
-      denom[r] <- n[r] * exp(log_pi_list[[r]][k])
+      denom[r] <- n[r] * exp(log_pi[k, r])
       num[, r] <- denom[r] * m[, r]
     }
     S[, k] <- (1 / sum(denom)) * rowSums(num)
@@ -214,10 +214,8 @@ vb_multinom <- function(data_list, param_list, n_iter = 100) {
   elbo <- vector(length = n_iter)
 
   n <- sapply(data_list$x_list, nrow)
-  log_pi_init <- lapply(seq_len(R), function(i) {
-    z <- rgamma(K, 1, 1)
-    log(z / sum(z))
-  })
+  log_pi_init <- matrix(rgamma(K * R, 1, 1), K, R)
+  log_pi_init <- log(log_pi_init %*% diag(1 / colSums(log_pi_init)))
   var_list <- list(m = matrix(0, p, R),
                    v_list = list(),
                    log_pi_list = log_pi_init)
@@ -236,10 +234,10 @@ vb_multinom <- function(data_list, param_list, n_iter = 100) {
         data_list$y_list[[r]],
         solve(param_list$Psi),
         param_list$S,
-        var_list$log_pi_list[[r]],
+        var_list$log_pi[, r],
         param_list$sigma
       )
-      var_list$log_pi_list[[r]] <- update_log_pi(
+      var_list$log_pi[, r] <- update_log_pi(
         var_list$m[, r],
         param_list$S,
         solve(param_list$Psi),
@@ -250,7 +248,7 @@ vb_multinom <- function(data_list, param_list, n_iter = 100) {
     # M-step
     param_list$phi <- update_phi(
       n,
-      var_list$log_pi_list
+      var_list$log_pi
     )
 
     param_list$Psi <- update_Psi(
@@ -258,12 +256,12 @@ vb_multinom <- function(data_list, param_list, n_iter = 100) {
       var_list$v_list,
       var_list$m,
       param_list$S,
-      var_list$log_pi_list
+      var_list$log_pi
     )
 
     param_list$S <- update_S(
       n,
-      var_list$log_pi_list,
+      var_list$log_pi,
       var_list$m
     )
 
