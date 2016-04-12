@@ -84,7 +84,7 @@ multinom_entropy <- function(log_pi_list) {
 #' @references Flexible Latent Variable Models for Multi-Task Learning
 #' @importFrom magrittr %>%
 #' @export
-vb_bound_multin <- function(data_list, var_list, param_list) {
+vb_bound_multinom <- function(data_list, var_list, param_list) {
 
   # retrieve data and parameters
   x_list <- data_list$x_list
@@ -142,8 +142,7 @@ update_log_pi <- function(m, S, Psi_inv, phi) {
   for (k in seq_len(K)) {
     log_pi_unnorm[k] <- log(phi[k]) + t(m - S[, k]) %*% Psi_inv %*% (m - S[, k])
   }
-  pi_unnorm <- exp(log_pi_unnorm)
-  pi_unnorm / sum(pi_unnorm)
+  log_pi_unnorm - log(sum(exp(log_pi_unnorm)))
 }
 
 # M-step -----------------------------------------------------------------------
@@ -152,7 +151,7 @@ update_log_pi <- function(m, S, Psi_inv, phi) {
 #' @description
 #' \varphi_{k} &\propto \sum_{r = 1}^{p_{1}} n_{r}\pi_{k}^{(r)}
 #' @export
-phi_update <- function(n, log_pi_list) {
+update_phi <- function(n, log_pi_list) {
   R <- length(n)
   K <- length(log_pi_list[[1]])
   phi_unnorm <- matrix(0, R, K)
@@ -167,26 +166,27 @@ phi_update <- function(n, log_pi_list) {
 #' @description
 #' \hat{Psi} &= \frac{1}{N}\sum_{r = 1}^{p_{1}}n_{r}\left(V^{(r)} + \sum_{k = 1}^{K}  \pi_{k}^{(r)}\left(m^{(r)} - s_{\cdot k}\right)\left(m^{(r)} - s_{\cdot k}\right)^{T}\right)
 #' @export
-Psi_update <- function(n, v_list, m_list, S, log_pi_list) {
+update_Psi <- function(n, v_list, m_list, S, log_pi_list) {
   R <- length(n)
   K <- ncol(S)
-  task_sums <- vector(length = R)
+  p <- nrow(v_list[[1]])
+  task_sums <- array(0, c(p, p, R))
   for (r in seq_len(R)) {
-    m_offset <- vector(length = K)
+    m_offset <- array(0, c(p, p, K))
     for(k in seq_len(K)) {
       pi_rk <- exp(log_pi_list[[r]][k])
-      m_offset[k] <- pi_rk * (m_list[[r]] - S[, k]) %*% t(m_list[[r]] - S[, k])
+      m_offset[,, k] <- pi_rk * (m_list[[r]] - S[, k]) %*% t(m_list[[r]] - S[, k])
     }
-    task_sums[r] <- n[r] * (v_list[[r]] + sum(m_offset))
+    task_sums[,, r] <- n[r] * (v_list[[r]] + apply(m_offset, c(1, 2), sum))
   }
-  sum(task_sums) / sum(n)
+  apply(task_sums, c(1, 2), sum) / sum(n)
 }
 
 #' @title Update latent sources S
 #' @description The k^th column is updated as
 #' \hat{s}_{\cdot k} &= \frac{\sum_{r = 1}^{p_{1}} n_{r}\pi_{k}^{(r)} m^{(r)}}{\sum_{r = 1}^{p_{1}} n_{r}\pi_{k}^{(r)}}
 #' @export
-s_update <- function(n, log_pi_list, m_list) {
+update_S <- function(n, log_pi_list, m_list) {
   K <- length(log_pi_list[[1]])
   p <- length(m_list[[1]])
   R <- length(n)
@@ -207,13 +207,89 @@ s_update <- function(n, log_pi_list, m_list) {
 #' @description This is updated using an average bias^2 + variance
 #' \hat{\sigma}^{2} &= \frac{1}{N} \sum_{r = 1}^{p_{1}} \sum_{i = 1}^{n_{r}}\left(y_{i}^{(r)} - x_{i}^{(r) T}m^{(r)}\right)^{2} + x_{i}^{(r) T}V^{(r)}x_{i}^{(r)}
 #' @export
-sigma_update <- function(x_list, y_list, m_list, v_list) {
+update_sigma <- function(x_list, y_list, m_list, v_list) {
   R <- length(x_list)
   task_sums <- vector(length = R)
   for(r in seq_len(R)) {
-    tasks_sums[r] <- sum( (y[[r]] - x_list[[r]] %*% m_list[[r]]) ^ 2) +
+    task_sums[r] <- sum( (y_list[[r]] - x_list[[r]] %*% m_list[[r]]) ^ 2) +
       sum(diag(v_list[[r]] %*% crossprod(x_list[[r]])))
   }
-  n <- lapply(x_list, nrow)
+  n <- sapply(x_list, nrow)
   1 / sum(n) * sum(task_sums)
+}
+
+# EM-update --------------------------------------------------------------------
+
+#' @title Variational Iteration for Multinomially Clustered Regressions
+#' @export
+vb_multinom <- function(data_list, param_list, n_iter = 100) {
+  R <- length(data_list$x_list)
+  K <- ncol(param_list$S)
+  elbo <- vector(length = n_iter)
+
+  n <- sapply(data_list$x_list, nrow)
+  log_pi_init <- lapply(seq_len(R), function(i) {
+    z <- rgamma(K, 1, 1)
+    log(z / sum(z))
+  })
+  var_list <- list(m_list = list(),
+                   v_list = list(),
+                   log_pi_list = log_pi_init)
+
+  for(iter in seq_len(n_iter)) {
+
+    # E-step
+    for(r in seq_len(R)) {
+      var_list$v_list[[r]] <- update_v(
+        data_list$x_list[[r]],
+        Psi,
+        param_list$sigma
+      )
+      var_list$m_list[[r]] <- update_m(
+        data_list$x_list[[r]],
+        data_list$y_list[[r]],
+        solve(param_list$Psi),
+        param_list$S,
+        var_list$log_pi_list[[r]],
+        param_list$sigma
+      )
+      var_list$log_pi_list[[r]] <- update_log_pi(
+        var_list$m_list[[r]],
+        param_list$S,
+        solve(param_list$Psi),
+        param_list$phi
+      )
+    }
+
+    # M-step
+    param_list$phi <- update_phi(
+      n,
+      var_list$log_pi_list
+    )
+
+    param_list$Psi <- update_Psi(
+      n,
+      var_list$v_list,
+      var_list$m_list,
+      param_list$S,
+      var_list$log_pi_list
+    )
+
+    param_list$S <- update_S(
+      n,
+      var_list$log_pi_list,
+      var_list$m_list
+    )
+
+    param_list$sigma <- update_sigma(
+      data_list$x_list,
+      data_list$y_list,
+      var_list$m_list,
+      var_list$v_list
+    )
+
+    # calculate evidence lower bound
+    elbo[iter] <- vb_bound_multinom(data_list, var_list, param_list)
+  }
+  list(param_list = param_list, var_list = var_list, elbo = elbo)
 }
