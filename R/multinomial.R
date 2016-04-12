@@ -16,7 +16,7 @@ gsn_loglik <- function(x_list, y_list, m_list, v_list, sigma) {
   for (r in seq_len(R)) {
     bias2 <- sum( (y_list[[r]] - x_list[[r]] %*% m_list[[r]]) ^ 2 )
     variance <- sum( diag(v_list[[r]] %*% crossprod(x_list[[r]])) )
-    tasks_sums[r] <- bias2 + variance
+    task_sums[r] <- bias2 + variance
   }
   (1 / (2 * sigma ^ 2)) * sum(task_sums)
 }
@@ -82,6 +82,7 @@ multinom_entropy <- function(log_pi_list) {
 #' @description Compute the variational lower bound, equation (17) in the
 #' reference, for the multinomial case.
 #' @references Flexible Latent Variable Models for Multi-Task Learning
+#' @importFrom magrittr %>%
 #' @export
 vb_bound_multin <- function(data_list, var_list, param_list) {
 
@@ -105,10 +106,10 @@ vb_bound_multin <- function(data_list, var_list, param_list) {
     abind(along = 3) %>%
     apply(c(1, 2), sum)
 
-  - N / 2 * log(sigma ^ 2) -
+  (1 / N) * (- N / 2 * log(sigma ^ 2) -
     gsn_loglik(x_list, y_list, m_list, v_list, sigma) -
-    N / 2 * log(det(Psi)) - 1 / 2 * tr(Psi_inv * v_weighted) -
+    N / 2 * log(det(Psi)) - 1 / 2 * sum(diag(Psi_inv * v_weighted)) -
       1 / 2 * mean_source_multinom(n, log_pi_list, m_list, S, Psi_inv) +
       mulitnom_loglik(n, log_pi_list, phi) +
-      1 / 2 * sum_log_det(v_list) - multinom_entropy(log_pi_list)
+      1 / 2 * sum_log_det(v_list) - multinom_entropy(log_pi_list))
 }
