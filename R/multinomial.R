@@ -133,9 +133,65 @@ update_m <- function(x, y, Psi_inv, S, log_pi, sigma) {
 update_log_pi <- function(m, S, Psi_inv, phi) {
   K <- ncol(S)
   log_pi_unnorm <- vector(length = K)
-  for(k in seq_len(K)) {
+  for (k in seq_len(K)) {
     log_pi_unnorm[k] <- log(phi[k]) + t(m - S[, k]) %*% Psi_inv %*% (m - S[, k])
   }
   pi_unnorm <- exp(log_pi_unnorm)
   pi_unnorm / sum(pi_unnorm)
+}
+
+# M-step -----------------------------------------------------------------------
+
+phi_update <- function(n, log_pi_list) {
+  R <- length(n)
+  K <- length(log_pi_list[[1]])
+  phi_unnorm <- matrix(0, R, K)
+  for (r in seq_len(R)) {
+    phi_unnorm[r, ] <- n[r] * exp(log_pi_list[[r]])
+  }
+  phi_unnorm <- colSums(phi_unnorm)
+  phi_unnorm / sum(phi_unnorm)
+}
+
+Psi_update <- function(n, v_list, m_list, S, log_pi_list) {
+  R <- length(n)
+  K <- ncol(S)
+  task_sums <- vector(length = R)
+  for (r in seq_len(R)) {
+    m_offset <- vector(length = K)
+    for(k in seq_len(K)) {
+      pi_rk <- exp(log_pi_list[[r]][k])
+      m_offset[k] <- pi_rk * (m_list[[r]] - S[, k]) %*% t(m_list[[r]] - S[, k])
+    }
+    task_sums[r] <- n[r] * (v_list[[r]] + sum(m_offset))
+  }
+  sum(task_sums) / sum(n)
+}
+
+s_update <- function(n, log_pi_list, m_list) {
+  K <- length(log_pi_list[[1]])
+  p <- length(m_list[[1]])
+  R <- length(n)
+  S <- matrix(0, p, K)
+  for(k in seq_len(K)) {
+    num <- matrix(0, nrow = p, ncol = R)
+    denom <- vector(length = R)
+    for(r in seq_len(R)) {
+      denom[r] <- n[r] * exp(log_pi_list[[r]][k])
+      num[, r] <- denom[r] * m_list[[r]]
+    }
+    S[, k] <- (1 / sum(denom)) * rowSums(num)
+  }
+  S
+}
+
+sigma_update <- function(x_list, y_list, m_list, v_list) {
+  R <- length(x_list)
+  task_sums <- vector(length = R)
+  for(r in seq_len(R)) {
+    tasks_sums[r] <- sum( (y[[r]] - x_list[[r]] %*% m_list[[r]]) ^ 2) +
+      sum(diag(v_list[[r]] %*% crossprod(x_list[[r]])))
+  }
+  n <- lapply(x_list, nrow)
+  1 / sum(n) * sum(task_sums)
 }
