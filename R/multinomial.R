@@ -10,12 +10,12 @@
 #' @description Computes the term
 #'  \sum_{r = 1}^{R} \sum_{i = 1}^{n_{r}} 1 / 2 * sigma ^ 2 ((y_{i}^{(r)} - x_{i}^{(r) T}m^{(r)})^2 + x_{i}^{(r) T} V^{(r)} x_{i}^{(r)}
 #' @export
-gsn_loglik <- function(x_list, y_list, m, v_list, sigma) {
+gsn_loglik <- function(x_list, y_list, m, v, sigma) {
   R <- length(x_list)
   task_sums <- vector(length = R)
   for (r in seq_len(R)) {
     bias2 <- sum( (y_list[[r]] - x_list[[r]] %*% m[, r]) ^ 2 )
-    variance <- sum( diag(v_list[[r]] %*% crossprod(x_list[[r]])) )
+    variance <- sum( diag(v[,, r] %*% crossprod(x_list[[r]])) )
     task_sums[r] <- bias2 + variance
   }
   (1 / (2 * sigma ^ 2)) * sum(task_sums)
@@ -53,10 +53,11 @@ mulitnom_loglik <- function(n, log_pi, phi) {
 #' @title Compute sum of log determinants
 #' @description \sum log|V^{(r)}|
 #' Maybe it would be smarter to do a cholesky factorization sort of things.
-sum_log_det <- function(v_list) {
-  task_sums <- vector(length = length(v_list))
-  for (r in seq_along(v_list)) {
-    task_sums[r] <- log(det(v_list[[r]]))
+sum_log_det <- function(v) {
+  R <- dim(v)[3]
+  task_sums <- vector(length = R)
+  for (r in seq_len(R)) {
+    task_sums[r] <- log(det(v[,, r]))
   }
   sum(task_sums)
 }
@@ -94,7 +95,7 @@ vb_bound_multinom <- function(data_list, var_list, param_list) {
 
   # retrieve variational and fixed parameters
   m <- var_list$m
-  v_list <- var_list$v_list
+  v <- var_list$v
   log_pi <- var_list$log_pi
   S <- param_list$S
   Psi <- param_list$Psi
@@ -102,16 +103,16 @@ vb_bound_multinom <- function(data_list, var_list, param_list) {
   sigma <- param_list$sigma
   Psi_inv <- solve(Psi)
 
-  v_weighted <- lapply(seq_along(n), function(i) n[i] * v_list[[i]] ) %>%
+  v_weighted <- lapply(seq_along(n), function(i) n[i] * v[,, i] ) %>%
     abind(along = 3) %>%
     apply(c(1, 2), sum)
 
   (1 / N) * (- N / 2 * log(sigma ^ 2) -
-    gsn_loglik(x_list, y_list, m, v_list, sigma) -
+    gsn_loglik(x_list, y_list, m, v, sigma) -
     N / 2 * log(det(Psi)) - 1 / 2 * sum(diag(Psi_inv * v_weighted)) -
       1 / 2 * mean_source_multinom(n, log_pi, m, S, Psi_inv) +
       mulitnom_loglik(n, log_pi, phi) +
-      1 / 2 * sum_log_det(v_list) - multinom_entropy(log_pi))
+      1 / 2 * sum_log_det(v) - multinom_entropy(log_pi))
 }
 
 # E-step -----------------------------------------------------------------------
@@ -166,10 +167,10 @@ update_phi <- function(n, log_pi) {
 #' @description
 #' \hat{Psi} &= \frac{1}{N}\sum_{r = 1}^{p_{1}}n_{r}\left(V^{(r)} + \sum_{k = 1}^{K}  \pi_{k}^{(r)}\left(m^{(r)} - s_{\cdot k}\right)\left(m^{(r)} - s_{\cdot k}\right)^{T}\right)
 #' @export
-update_Psi <- function(n, v_list, m, S, log_pi) {
+update_Psi <- function(n, v, m, S, log_pi) {
   R <- length(n)
   K <- ncol(S)
-  p <- nrow(v_list[[1]])
+  p <- nrow(v)
   task_sums <- array(0, c(p, p, R))
   for (r in seq_len(R)) {
     m_offset <- array(0, c(p, p, K))
@@ -177,7 +178,7 @@ update_Psi <- function(n, v_list, m, S, log_pi) {
       pi_rk <- exp(log_pi[k, r])
       m_offset[,, k] <- pi_rk * (m[, r] - S[, k]) %*% t(m[, r] - S[, k])
     }
-    task_sums[,, r] <- n[r] * (v_list[[r]] + apply(m_offset, c(1, 2), sum))
+    task_sums[,, r] <- n[r] * (v[,, r] + apply(m_offset, c(1, 2), sum))
   }
   apply(task_sums, c(1, 2), sum) / sum(n)
 }
@@ -217,14 +218,14 @@ vb_multinom <- function(data_list, param_list, n_iter = 100) {
   log_pi_init <- matrix(rgamma(K * R, 1, 1), K, R)
   log_pi_init <- log(log_pi_init %*% diag(1 / colSums(log_pi_init)))
   var_list <- list(m = matrix(0, p, R),
-                   v_list = list(),
+                   v = array(0, c(p, p, R)),
                    log_pi_list = log_pi_init)
 
   for (iter in seq_len(n_iter)) {
 
     # E-step
     for (r in seq_len(R)) {
-      var_list$v_list[[r]] <- update_v(
+      var_list$v[,, r] <- update_v(
         data_list$x_list[[r]],
         Psi,
         param_list$sigma
@@ -253,7 +254,7 @@ vb_multinom <- function(data_list, param_list, n_iter = 100) {
 
     param_list$Psi <- update_Psi(
       n,
-      var_list$v_list,
+      var_list$v,
       var_list$m,
       param_list$S,
       var_list$log_pi
