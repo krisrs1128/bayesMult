@@ -203,21 +203,6 @@ update_S <- function(n, log_pi_list, m_list) {
   S
 }
 
-#' @title Update noise parameter sigma^2
-#' @description This is updated using an average bias^2 + variance
-#' \hat{\sigma}^{2} &= \frac{1}{N} \sum_{r = 1}^{p_{1}} \sum_{i = 1}^{n_{r}}\left(y_{i}^{(r)} - x_{i}^{(r) T}m^{(r)}\right)^{2} + x_{i}^{(r) T}V^{(r)}x_{i}^{(r)}
-#' @export
-update_sigma <- function(x_list, y_list, m_list, v_list) {
-  R <- length(x_list)
-  task_sums <- vector(length = R)
-  for(r in seq_len(R)) {
-    task_sums[r] <- sum( (y_list[[r]] - x_list[[r]] %*% m_list[[r]]) ^ 2) +
-      sum(diag(v_list[[r]] %*% crossprod(x_list[[r]])))
-  }
-  n <- sapply(x_list, nrow)
-  1 / sum(n) * sum(task_sums)
-}
-
 # EM-update --------------------------------------------------------------------
 
 #' @title Variational Iteration for Multinomially Clustered Regressions
@@ -279,13 +264,6 @@ vb_multinom <- function(data_list, param_list, n_iter = 100) {
       n,
       var_list$log_pi_list,
       var_list$m_list
-    )
-
-    param_list$sigma <- update_sigma(
-      data_list$x_list,
-      data_list$y_list,
-      var_list$m_list,
-      var_list$v_list
     )
 
     # calculate evidence lower bound
