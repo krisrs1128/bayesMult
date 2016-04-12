@@ -123,6 +123,10 @@ update_v <- function(x, Psi, sigma) {
   1 / n * solve(solve(Psi) + 1 / (n * (sigma ^ 2)) * crossprod(x))
 }
 
+#' @title Update variational mean parameters
+#' @description
+#' \hat{m}^{(r)} &= \left(\frac{1}{\sigma^{2}}X^{(r) T}X^{(r)} + n_{r}\Psi^{-1}\right)^{-1}\left(\frac{1}{\sigma^{2}}X^{(r) T}y^{(r)} + n_{r}\Psi^{-1} S \pi^{(r)}\right)
+#' @export
 update_m <- function(x, y, Psi_inv, S, log_pi, sigma) {
   n <- nrow(x)
   A <- (1 / sigma ^ 2) * crossprod(x) + n * Psi_inv
@@ -130,6 +134,8 @@ update_m <- function(x, y, Psi_inv, S, log_pi, sigma) {
   solve(A, B)
 }
 
+#' @title Update the variational clustering parameters
+#' @description \hat{\pi}_{k}^{(r)} &\propto \varphi_{k}\exp{\left(m^{(r)} - s_{\cdot k}\right)^{T}\Psi^{-1}\left(m^{(r)} - s_{\cdot k}\right)}
 update_log_pi <- function(m, S, Psi_inv, phi) {
   K <- ncol(S)
   log_pi_unnorm <- vector(length = K)
@@ -142,6 +148,10 @@ update_log_pi <- function(m, S, Psi_inv, phi) {
 
 # M-step -----------------------------------------------------------------------
 
+#' @title Update the multinomial clustering probabilities
+#' @description
+#' \varphi_{k} &\propto \sum_{r = 1}^{p_{1}} n_{r}\pi_{k}^{(r)}
+#' @export
 phi_update <- function(n, log_pi_list) {
   R <- length(n)
   K <- length(log_pi_list[[1]])
@@ -153,6 +163,10 @@ phi_update <- function(n, log_pi_list) {
   phi_unnorm / sum(phi_unnorm)
 }
 
+#' @title Update unshared covariance matrix Psi
+#' @description
+#' \hat{Psi} &= \frac{1}{N}\sum_{r = 1}^{p_{1}}n_{r}\left(V^{(r)} + \sum_{k = 1}^{K}  \pi_{k}^{(r)}\left(m^{(r)} - s_{\cdot k}\right)\left(m^{(r)} - s_{\cdot k}\right)^{T}\right)
+#' @export
 Psi_update <- function(n, v_list, m_list, S, log_pi_list) {
   R <- length(n)
   K <- ncol(S)
@@ -168,6 +182,10 @@ Psi_update <- function(n, v_list, m_list, S, log_pi_list) {
   sum(task_sums) / sum(n)
 }
 
+#' @title Update latent sources S
+#' @description The k^th column is updated as
+#' \hat{s}_{\cdot k} &= \frac{\sum_{r = 1}^{p_{1}} n_{r}\pi_{k}^{(r)} m^{(r)}}{\sum_{r = 1}^{p_{1}} n_{r}\pi_{k}^{(r)}}
+#' @export
 s_update <- function(n, log_pi_list, m_list) {
   K <- length(log_pi_list[[1]])
   p <- length(m_list[[1]])
@@ -185,6 +203,10 @@ s_update <- function(n, log_pi_list, m_list) {
   S
 }
 
+#' @title Update noise parameter sigma^2
+#' @description This is updated using an average bias^2 + variance
+#' \hat{\sigma}^{2} &= \frac{1}{N} \sum_{r = 1}^{p_{1}} \sum_{i = 1}^{n_{r}}\left(y_{i}^{(r)} - x_{i}^{(r) T}m^{(r)}\right)^{2} + x_{i}^{(r) T}V^{(r)}x_{i}^{(r)}
+#' @export
 sigma_update <- function(x_list, y_list, m_list, v_list) {
   R <- length(x_list)
   task_sums <- vector(length = R)
